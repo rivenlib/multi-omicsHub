@@ -1,0 +1,235 @@
+plantmap_server <- function(input, output, session) {
+  data <- dat3
+  #first_row <- data[1, ]
+  # observe({
+  #   updateSelectizeInput(
+  #     inputId = "SG",
+  #     choices = unique(names(data)[-1]),
+  #                      server = TRUE
+  #     )
+  # })
+  # observe({
+  #   updateSelectizeInput(
+  #     inputId = "SG",
+  #     choices = unique(data[, 13]),
+  #     server = TRUE
+  #   )
+  #   
+  # })
+  
+  
+  observeEvent(eventExpr = input$root_go, {
+    
+    output$ui_platmap <- renderUI({
+      
+      removeUI(selector = "#default_root")
+      fluidRow(
+        dataTableOutput("roi"),
+        fluidRow(
+          column(width=6,
+                 withSpinner(
+                   plotOutput("heatmapPlot")  
+                 )
+                 
+          ),
+          column(width=6,
+                 withSpinner(forceNetworkOutput("TFnet"))
+                 
+          )
+        )
+        
+      )
+      
+    })
+  })
+  
+  output$roi <- renderDataTable({
+    if(is.null(input$SG)||input$SG=="")
+    {
+
+    }
+    else
+    {
+      data<-df3[grep(input$SG, df3[['targetID']], ignore.case = TRUE),]
+    }
+
+  },options = list(scrollX = TRUE, scrollY = "500px"),#filter = list(input$search)
+  )
+
+  
+ output$heatmapPlot <- renderPlot({
+   new.ggPlantmap <- XML.to.ggPlantmap("./extdata/roi_all.xml")
+   new.express<-read.table("./extdata/transposed_roi.txt",head=T)
+   
+   
+   
+   
+   
+   
+   #ggPlantmap.merge(new.ggPlantmap,new.express,"ROI.name")
+   quant.data=ggPlantmap.merge(new.ggPlantmap,new.express,"ROI.name")
+   if(is.null(input$SG)||input$SG=="")
+   {
+
+   }
+   else
+   {
+     gen_name<-input$SG
+    print(gen_name)
+     id=colnames(quant.data)[which(names(quant.data) == input$SG)]
+
+     ggPlantmap.heatmap(quant.data,get(id))+
+       scale_fill_gradient2(low="white",mid = "yellow",high="red") +
+        labs(title=input$SG) ## Title of the plot should be name of the gene
+   }
+
+
+
+
+	 # 加载数据
+	 #plot_list<-list()
+	 #for(i in 1:5)
+	 #{
+
+
+    # 创建 ggplot2 绘图
+    #plot_list[[i]]<-ggPlantmap.heatmap(quant.data, expression)
+	 #}
+	 #combined_plot <- patchwork::wrap_plots(plot_list,rcol=1,heights=rep(1,5))  # 或 cowplot::plot_grid(plotlist = plot_list)
+ 	#combined_plot
+
+
+ })
+ 
+ 
+ 
+
+ # 存储筛选结果
+ PM_filtered_data3 <- reactiveVal()
+ PM_nodes<- reactiveVal()
+ PM_edgs<- reactiveVal()
+ PM_dgree<-data.frame()
+ PM_down<-reactiveVal()
+ output$TFnet <- renderForceNetwork({
+   if(is.null(input$SG)||input$SG=="")
+   {
+     
+   }
+   else
+   {
+     data<-df3[grep(input$SG, df3[['targetID']], ignore.case = TRUE),]
+     
+     
+     PM_filtered_data3(data)
+     
+     # 提取边,
+     PM_edgs(
+       data.frame(
+         select(PM_filtered_data3(), 'TF_ID', 'targetID')
+       )
+     )
+     
+     #write.table(PM_edgs(),  sep = "\t", quote = F,row.names = FALSE)
+     #结点
+     PM_nodes(
+       data.frame(col1 = c(PM_edgs()$TF_ID, PM_edgs()$targetID), col2 = c(PM_filtered_data3()$TF_Symbol1, PM_filtered_data3()$targetSymbol))%>%
+         distinct()
+       #{rename(., name = col1, group = col2)}
+     )
+     
+     #PM_nodes(rename(PM_nodes(), name = col1, group = col2))
+     # write.table(PM_nodes(),  sep = "\t", quote = F,row.names = FALSE)
+     # 统计每个结点的出度
+     PM_dgree <- PM_edgs() %>%
+       count(targetID, name = "weight")
+     
+     
+     PM_edgs <- PM_edgs() %>%
+       mutate(weight = ifelse(targetID %in% PM_dgree$targetID, PM_dgree[match(targetID, PM_dgree$targetID), "weight"], 0))
+     PM_down(PM_edgs)
+     
+     
+     {
+       
+       
+       if(nrow(PM_down()) <1){
+         showModal(modalDialog(
+           title = "警告",
+           HTML("过滤后没有边可显示！"),
+           easyClose = TRUE,
+           footer = NULL
+         ))
+       }
+       else{
+         
+         #PM_edgs <- subset(PM_edgs, weight >= input$threshold)
+         #write.table(edgs, sep = "\t", row.names = T)
+         
+         #结点
+         nodes<-data.frame(col1 = c(PM_edgs$TF_ID, PM_edgs$targetID))%>%#, col2 = c(data$TFname, data$Symbol))%>%
+           distinct()
+         # %>%
+         #     rename(name=col1)#,group=col2)
+         #write.table(nodes, sep = "\t", row.names = T)
+         
+         
+         
+         # nodes_frame<-as.data.frame(nodes)
+         # rownames(nodes_frame) <- seq(0, nrow(nodes_frame) - 1)
+         # edgs_frame<-as.data.frame(edgs)
+         # rownames(edgs_frame) <- seq(0, nrow(edgs_frame) - 1)
+         # write.table( net_d3$node, sep = "\t", row.names = T)
+         # write.table( edgs, sep = "\t", row.names = T)
+         
+         
+         
+         
+         
+         # Generate graph from data frame
+         net_pc <- graph_from_data_frame(
+           d=PM_edgs,vertices=nodes,
+           directed=FALSE
+         )
+         
+         
+         # Calculate edge weights based on some criterion (e.g., degree)
+         #E(net_pc)$weight<-PM_edgs$weight
+         wc <- cluster_walktrap(net_pc)
+         members <- membership(wc)
+         net_d3  <- igraph_to_networkD3(net_pc,group = members)
+         
+         
+         #number of 0 begin
+         # edgs_frame<-as.data.frame(net_d3$links)
+         # rownames(edgs_frame) <- seq(0, nrow(edgs_frame) - 1)
+         # nodes_frame<-as.data.frame(net_d3$nodes)
+         # rownames(nodes_frame) <- seq(0, nrow(nodes_frame) - 1)
+         
+         
+         
+         #net_d3$links <- subset(net_d3$links, value >= input$threshold)
+         write.table( net_d3$node, sep = "\t", row.names = T)
+         net_out <- forceNetwork(Links = net_d3$links, Nodes = net_d3$nodes,
+                                 Source = 'source', Target = 'target',
+                                 NodeID = 'name', Group = 'group',
+                                 zoom = T, bounded = F,
+                                 opacity = 5, fontSize = 32,
+                                 charge = -5
+         )
+         #output$results3_2 <- renderDataTable({net_d3$links})
+         
+         #return(net_out)
+         #}
+       }
+       
+     }
+     
+     
+   }
+   
+   
+
+
+ })
+
+}
